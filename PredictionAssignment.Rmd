@@ -1,0 +1,141 @@
+---
+title: Practical Machine Learning Prediction Assignment.
+author: "Alexandr Polyakov"
+date: "22.09.2015"
+output: html_document
+---
+
+
+# Synopsis
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. 
+
+In this project, we use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants who were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+This project aims to analyse data from accelerometers to predict the manner in which the participants did the exercise. 
+
+The data for this project can be obtained from this source: http://groupware.les.inf.puc-rio.br/har. 
+
+# Data Processing
+
+###1. Preliminary settings
+
+```{r}
+#make code visible
+echo = TRUE
+#set up directory for graphs
+knitr::opts_chunk$set(fig.path='figures/')
+cache = TRUE
+library(caret)
+library(gbm)
+set.seed(0)
+```
+
+###2. Download training and test data
+
+
+```{r}
+trainingDataUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testDataUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+trainingDataFile <- "pml-training.csv"
+testDataFile <- "pml-testing.csv"
+
+if (!file.exists(trainingDataFile)) {
+    download.file(trainingDataUrl, trainingDataFile, method="curl", quiet = T)
+}
+
+if (!file.exists(testDataFile)) {
+    download.file(testDataUrl, testDataFile, method="curl", quiet = T)
+}
+
+inputData <- read.csv(trainingDataFile, sep = ",", quote = "\"")
+testData <- read.csv(testDataFile, sep = ",", quote = "\"")
+```
+
+###3. Data cleaning
+
+In order to reduce number of predictors and reduce noise, we remove some unimportant columns.
+
+Before cleaning the dimensions of the training set are the following:
+
+```{r}
+dim(inputData)
+```
+
+Firstly, remove columns with "NA" values
+
+```{r}
+inputData <- inputData[, colSums(is.na(inputData)) == 0]
+testData <- testData[, colSums(is.na(testData)) == 0]
+```
+
+Secondly, remove zero covariates
+```{r}
+nzvar <- nearZeroVar(inputData, saveMetrics = T)
+inputData <- inputData[, !(nzvar$nzv)]
+
+nzvar <- nearZeroVar(testData, saveMetrics = T)
+testData <- testData[, !(nzvar$nzv)]
+```
+
+Lastly, remove columns which do not affect analyses
+```{r}
+remove <-  c("X", "user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp")
+inputData <- inputData[,!(names(inputData) %in% remove)] 
+testData <- testData[,!(names(testData) %in% remove)]
+```
+
+So we can see that after cleaning the number of columns is reduced:
+
+```{r}
+dim(inputData)
+```
+
+###4. Data slicing
+
+Create a data set that is 60% is allocated to the training set, and 40% is allocated to the testing set.
+
+```{r}
+inTrain <- createDataPartition(y = inputData$classe, p = 0.6, list = FALSE) 
+training <-inputData[inTrain,] 
+testing <- inputData[-inTrain,]
+```
+
+###5. Model creation
+
+To predict the classe outcome, we use the boosting method, because it is a widely used and highly accurate method and provide better accuracy with less trees. It also allows to do  cross validation.
+For this model we use 3-fold cross validation.
+
+```{r}
+myTuneGrid <- expand.grid(n.trees=seq(1,200,10), interaction.depth = 2:7, shrinkage = 0.1, n.minobsinnode = 10)
+fitControl <- trainControl(method = "repeatedcv", number = 3, repeats = 1, verboseIter = FALSE, returnResamp = "all")
+modFit <- train(classe ~ ., method = "gbm", data = training, trControl = fitControl, tuneGrid = myTuneGrid, verbose = FALSE)
+````
+
+#Results
+
+After applying the model to the testing data set
+
+```{r}
+predictions <- predict(modFit, testing)
+confusionMatrix(predictions, testing$classe)
+accuracy <- postResample(predictions, testing$classe)
+accuracy
+ose <- 1 - as.numeric(confusionMatrix(testing$classe, predictions)$overall[1])
+ose
+```
+
+we can see that the accuracy of the model is `r round(accuracy[1] * 100, digits = 2)`% and we expect the out of sample error to be `r round(ose * 100, digits = 2)`%.
+
+### Test data set prediction
+
+After applying our machine learning algorithm to the 20 test cases available in the test data above we can get predicted values:
+
+```{r}
+res <- predict(modFit, testData[, -length(names(testData))])
+res
+```
+
+#Conclusion
+With obtained values accuracy of `r round(accuracy[1] * 100, digits = 2)`% and the out of sample error of `r round(ose * 100, digits = 2)`% we can conclude that developed model provides quite high level accuracy.
